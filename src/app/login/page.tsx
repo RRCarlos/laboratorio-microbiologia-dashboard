@@ -1,19 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
-import { Activity, Mail, Lock, LogIn } from "lucide-react";
+import { Activity, Mail, Lock, LogIn, AlertCircle } from "lucide-react";
 
-// Inicializar cliente Supabase para auth
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://xahpjrfypxzeaspjnyuq.supabase.co";
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "sb_publishable_4kdEZJzkVu5Pdmi19X-r_Q_7zov6nY-";
-const supabaseAuth = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    autoRefreshToken: true,
-    persistSession: true,
+// Crear cliente solo una vez
+const getSupabaseClient = () => {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  
+  console.log("Supabase URL:", supabaseUrl);
+  console.log("Supabase Key:", supabaseAnonKey ? "_configured" : "missing");
+  
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error("Faltan variables de entorno");
   }
-});
+  
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+    },
+    global: {
+      headers: {
+        "apikey": supabaseAnonKey,
+      },
+    },
+  });
+};
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,27 +36,54 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [debugInfo, setDebugInfo] = useState("");
+
+  // Verificar conexión a Supabase al montar
+  useEffect(() => {
+    console.log("=== LOGIN PAGE MOUNTED ===");
+    console.log("NEXT_PUBLIC_SUPABASE_URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
+    console.log("NEXT_PUBLIC_SUPABASE_ANON_KEY:", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "presente" : "ausente");
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
+    setDebugInfo("");
+
+    console.log("=== INTENTANDO LOGIN ===");
+    console.log("Email:", email);
 
     try {
-      const { data, error: authError } = await supabaseAuth.auth.signInWithPassword({
-        email,
+      const supabase = getSupabaseClient();
+      
+      console.log("Llamando a signInWithPassword...");
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
         password,
       });
 
-      if (authError) throw authError;
+      console.log("Respuesta:", { data: data?.user, error: authError });
 
-      if (data?.user) {
-        // Login exitoso, redirigir al dashboard
-        router.push("/");
+      if (authError) {
+        console.error("Auth error:", authError);
+        setError(authError.message);
+        setDebugInfo(`Código: ${authError.code}`);
+        return;
       }
+
+      if (!data?.user) {
+        setError("No se recibió información del usuario");
+        return;
+      }
+
+      console.log("Login exitoso para:", data.user.email);
+      router.push("/");
+      
     } catch (err: any) {
-      console.error("Login error:", err);
-      setError(err.message || "Error al iniciar sesión");
+      console.error("Excepción:", err);
+      setError(err.message || "Error al conectar con Supabase");
+      setDebugInfo(err.stack || "");
     } finally {
       setLoading(false);
     }
@@ -74,6 +116,13 @@ export default function LoginPage() {
               Inicia sesión para continuar
             </p>
           </div>
+
+          {/* Debug info - solo en desarrollo */}
+          {debugInfo && (
+            <div className="mb-4 p-2 rounded bg-yellow-500/10 border border-yellow-500 text-xs text-yellow-500 font-mono">
+              DEBUG: {debugInfo}
+            </div>
+          )}
 
           {/* Form */}
           <form onSubmit={handleLogin} className="space-y-4">
@@ -111,8 +160,9 @@ export default function LoginPage() {
 
             {/* Error */}
             {error && (
-              <div className="p-3 rounded-lg bg-[var(--destructive)]/10 border border-[var(--destructive)] text-[var(--destructive)] text-sm">
-                {error}
+              <div className="p-3 rounded-lg bg-[var(--destructive)]/10 border border-[var(--destructive)] text-[var(--destructive)] text-sm flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                <span>{error}</span>
               </div>
             )}
 
