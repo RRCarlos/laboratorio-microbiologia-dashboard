@@ -2,32 +2,15 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
 import { Activity, Mail, Lock, LogIn, AlertCircle } from "lucide-react";
 
-// Crear cliente solo una vez
-const getSupabaseClient = () => {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  
-  console.log("Supabase URL:", supabaseUrl);
-  console.log("Supabase Key:", supabaseAnonKey ? "_configured" : "missing");
-  
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error("Faltan variables de entorno");
-  }
-  
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      autoRefreshToken: true,
-      persistSession: true,
-    },
-    global: {
-      headers: {
-        "apikey": supabaseAnonKey,
-      },
-    },
-  });
+// Cliente para el browser - usa las mismas cookies que el middleware
+const createBrowserSupabaseClient = () => {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 };
 
 export default function LoginPage() {
@@ -36,54 +19,55 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [debugInfo, setDebugInfo] = useState("");
 
-  // Verificar conexión a Supabase al montar
+  // Verificar si ya hay sesión al montar
   useEffect(() => {
-    console.log("=== LOGIN PAGE MOUNTED ===");
-    console.log("NEXT_PUBLIC_SUPABASE_URL:", process.env.NEXT_PUBLIC_SUPABASE_URL);
-    console.log("NEXT_PUBLIC_SUPABASE_ANON_KEY:", process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ? "presente" : "ausente");
-  }, []);
+    async function checkSession() {
+      const supabase = createBrowserSupabaseClient();
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        router.replace("/");
+      }
+    }
+    checkSession();
+  }, [router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
-    setDebugInfo("");
-
-    console.log("=== INTENTANDO LOGIN ===");
-    console.log("Email:", email);
 
     try {
-      const supabase = getSupabaseClient();
-      
-      console.log("Llamando a signInWithPassword...");
+      const supabase = createBrowserSupabaseClient();
+
+      console.log("🔐 Intentando login con:", email);
+
       const { data, error: authError } = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
         password,
       });
 
-      console.log("Respuesta:", { data: data?.user, error: authError });
-
       if (authError) {
-        console.error("Auth error:", authError);
+        console.error("❌ Error auth:", authError);
         setError(authError.message);
-        setDebugInfo(`Código: ${authError.code}`);
         return;
       }
 
-      if (!data?.user) {
-        setError("No se recibió información del usuario");
+      if (!data?.session?.user) {
+        console.error("❌ Sin sesión");
+        setError("No se pudo iniciar sesión");
         return;
       }
 
-      console.log("Login exitoso para:", data.user.email);
-      router.push("/");
-      
+      console.log("✅ Login exitoso:", data.user.email);
+
+      // Forzar refresh y redirigir
+      router.refresh();
+      router.replace("/");
+
     } catch (err: any) {
-      console.error("Excepción:", err);
+      console.error("❌ Excepción:", err);
       setError(err.message || "Error al conectar con Supabase");
-      setDebugInfo(err.stack || "");
     } finally {
       setLoading(false);
     }
@@ -94,7 +78,7 @@ export default function LoginPage() {
       {/* Fondo decorativo */}
       <div className="absolute inset-0 bg-grid-pattern opacity-30 pointer-events-none"></div>
       <div className="absolute inset-0 bg-mesh-gradient pointer-events-none"></div>
-      
+
       {/* Login Card */}
       <div className="relative w-full max-w-md">
         {/* Corner decorations */}
@@ -102,7 +86,7 @@ export default function LoginPage() {
         <div className="absolute -top-2 -right-2 w-4 h-4 border-t-2 border-r-2 border-[var(--primary)]"></div>
         <div className="absolute -bottom-2 -left-2 w-4 h-4 border-b-2 border-l-2 border-[var(--primary)]"></div>
         <div className="absolute -bottom-2 -right-2 w-4 h-4 border-b-2 border-r-2 border-[var(--primary)]"></div>
-        
+
         <div className="bg-[var(--card)] border border-[var(--border)] p-8 form-card">
           {/* Logo */}
           <div className="text-center mb-8">
@@ -117,10 +101,11 @@ export default function LoginPage() {
             </p>
           </div>
 
-          {/* Debug info - solo en desarrollo */}
-          {debugInfo && (
-            <div className="mb-4 p-2 rounded bg-yellow-500/10 border border-yellow-500 text-xs text-yellow-500 font-mono">
-              DEBUG: {debugInfo}
+          {/* Error */}
+          {error && (
+            <div className="mb-4 p-3 rounded-lg bg-[var(--destructive)]/10 border border-[var(--destructive)] text-[var(--destructive)] text-sm flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 flex-shrink-0" />
+              <span>{error}</span>
             </div>
           )}
 
@@ -157,14 +142,6 @@ export default function LoginPage() {
                 />
               </div>
             </div>
-
-            {/* Error */}
-            {error && (
-              <div className="p-3 rounded-lg bg-[var(--destructive)]/10 border border-[var(--destructive)] text-[var(--destructive)] text-sm flex items-center gap-2">
-                <AlertCircle className="h-4 w-4 flex-shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
 
             {/* Submit */}
             <button
